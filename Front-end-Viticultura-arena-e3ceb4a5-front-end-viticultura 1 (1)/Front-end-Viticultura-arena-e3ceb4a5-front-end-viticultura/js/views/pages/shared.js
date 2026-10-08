@@ -6,6 +6,7 @@ import { barChart, lineChart } from '../../components/charts.js';
 import { pageHeader } from '../../components/page-header.js';
 import { comparisonTable, tableWrapper } from '../../components/tables.js';
 import { page } from './page-layout.js';
+import { climateMetric } from '../../config/climate-metrics.js';
 
 /* ------------------------------ Comparação ------------------------------ */
 
@@ -19,8 +20,8 @@ export function comparisonPage({ comparison, dashboard, plantations = [], variet
   const ranking = buckets.slice().sort((left, right) => Number(right.plants || 0) - Number(left.plants || 0)).map((item, index) =>
     html`<div><b>${index + 1}º</b><strong>${item.variety}</strong><span>${Number(item.plants || 0).toLocaleString('pt-BR')} plantas · ${item.plantations || 0} áreas</span></div>`,
   );
-  const temperature = Object.entries(comparisonData.climateMetrics || {}).find(([name]) => ['temperature', 'temperaturec', 'tempc'].includes(name.toLowerCase().replaceAll('_', '')))?.[1];
-  const humidity = Object.entries(comparisonData.climateMetrics || {}).find(([name]) => ['humidity', 'relativehumidity'].includes(name.toLowerCase().replaceAll('_', '')))?.[1];
+  const temperature = climateMetric({ metrics: comparisonData.climateMetrics }, 'temperature');
+  const humidity = climateMetric({ metrics: comparisonData.climateMetrics }, 'humidity');
   const plantValues = buckets.map((item) => Number(item.plants || 0));
   const plantLabels = buckets.map((item) => item.variety);
   const messages = [

@@ -1,6 +1,6 @@
 # AgroClima Cloud — desenvolvimento local
 
-Aplicação web com frontend JavaScript, API de domínio Spring Boot, serviço analítico FastAPI e MySQL Server local (administrável pelo MySQL Workbench). O ambiente de desenvolvimento usa **somente serviços locais**: não precisa de domínio, hospedagem, Railway, Render, AWS, Azure, Vercel ou Docker. ThingSpeak é a única integração externa opcional em tempo de execução.
+Aplicação web com frontend JavaScript, API de domínio Spring Boot, serviço analítico FastAPI e MySQL Server local (administrável pelo MySQL Workbench). O ambiente de desenvolvimento usa **somente serviços locais**: não precisa de domínio, hospedagem, Railway, Render, AWS, Azure, Vercel ou Docker. ThingSpeak é a única integração externa opcional em tempo de execução e é consultado somente pelo backend Java.
 
 O navegador chama caminhos same-origin (`/api/java` e `/api/python`); o proxy do Vite encaminha as chamadas para as APIs locais. As fontes DM Sans e Manrope são empacotadas no frontend, e os arquivos Swagger UI do Python são servidos pela própria API; a documentação não depende de CDN.
 
@@ -81,7 +81,7 @@ Execute o comando separadamente para cada segredo; use o valor de `DATABASE_PASS
 
 `JAVA_API_URL` deve permanecer como `http://localhost:8080`. Copie para `INTERNAL_API_KEY` **o mesmo valor** usado pela API Java. `CORS_ALLOWED_ORIGINS` permite as origens locais configuradas sem usar wildcard.
 
-ThingSpeak é opcional para iniciar o serviço: deixe `THINGSPEAK_CHANNEL_ID` vazio até ter um canal. Se quiser integrar um canal, veja [ThingSpeak](#8-thingspeak-opcional).
+O Python não acessa o ThingSpeak e não possui variáveis `THINGSPEAK_*`: as leituras chegam pela API Java, autenticadas com `INTERNAL_API_KEY`. A configuração do canal fica em `backend/java/.env`; veja [ThingSpeak](#8-thingspeak-opcional).
 
 ### Frontend — `.env` na raiz
 
@@ -153,7 +153,7 @@ python -m pip install -r requirements.txt
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-FastAPI lê `backend/python/.env` ao iniciar a partir dessa pasta. Sem `THINGSPEAK_CHANNEL_ID`, a API sobe normalmente, a sincronização em background fica inativa e o health informa que a integração não está configurada.
+FastAPI lê `backend/python/.env` ao iniciar a partir dessa pasta. Se a API Java estiver fora do ar, o Python continua iniciando; as rotas que dependem de leituras respondem com indisponibilidade e `/health` mostra `javaApiConfigured` e `internalKeyConfigured`.
 
 - Health: <http://localhost:8000/health>
 - Swagger UI: <http://localhost:8000/docs>
@@ -226,18 +226,30 @@ A resposta deve incluir `Access-Control-Allow-Origin: http://localhost:5173`. O 
 
 ## 8. ThingSpeak (opcional)
 
-ThingSpeak é a única dependência externa de runtime e só é utilizada se um canal estiver configurado. No arquivo `backend/python/.env`, defina:
+O backend Java consulta o canal diretamente em `https://api.thingspeak.com/channels/3499301/feeds.json`, normaliza as leituras e grava no MySQL. O Python e o frontend não acessam o ThingSpeak: o Python lê as leituras da API Java com `INTERNAL_API_KEY`.
+
+No arquivo `backend/java/.env`, defina:
 
 ```dotenv
-THINGSPEAK_CHANNEL_ID=ID_NUMERICO_DO_CANAL
-THINGSPEAK_READ_API_KEY=CHAVE_DE_LEITURA_SE_O_CANAL_FOR_PRIVADO
+THINGSPEAK_ENABLED=true
+THINGSPEAK_CHANNEL_ID=3499301
+THINGSPEAK_READ_API_KEY=SUA_READ_API_KEY_LOCAL
 THINGSPEAK_URL=https://api.thingspeak.com
-THINGSPEAK_FIELD_MAP={"temperature":"field1","humidity":"field2","rainfall":"field3","luminosity":"field4","soilHumidity":"field5"}
+THINGSPEAK_FIELD_MAP='{"temperature":"field1","humidity":"field2"}'
+THINGSPEAK_POLL_INTERVAL_SECONDS=300
 ```
 
-Ajuste o mapa conforme os campos reais do canal e reinicie o serviço Python. A sincronização automática roda no intervalo `THINGSPEAK_POLL_INTERVAL_SECONDS`; também é possível solicitar sincronização manual autenticado como Administrador em `POST http://localhost:8000/api/v1/integrations/thingspeak/sync`. A API Python normaliza as leituras e envia os dados à API Java pela rota interna protegida por `INTERNAL_API_KEY`; não acessa o MySQL diretamente.
+O canal possui apenas dois campos ativos: **field1 = temperatura (°C)** e **field2 = umidade (%)**. O mapa é fixo: qualquer outro valor em `THINGSPEAK_FIELD_MAP` impede a inicialização do Java. Os demais campos do canal são ignorados. Mantenha o JSON entre aspas simples para que o `run-local.sh` não o quebre.
 
-Verifique `/health` para `thingspeakConfigured` e, autenticado como Administrador, consulte `/api/v1/integrations/thingspeak/status`. Sem canal/chave, o backend local continua iniciando; as rotas que precisam de leituras retornam o estado de indisponibilidade correspondente.
+A `THINGSPEAK_READ_API_KEY` é um segredo: fica somente no `backend/java/.env` local (ignorado pelo Git) e não deve aparecer em arquivos de exemplo nem em logs.
+
+Sincronização:
+
+- automática: a cada `THINGSPEAK_POLL_INTERVAL_SECONDS`, somente com `THINGSPEAK_ENABLED=true`;
+- manual (ADMIN): `POST http://localhost:8080/api/integrations/thingspeak/sync`, com `?from=AAAA-MM-DDTHH:MM:SSZ&to=...` opcional (janela de até 366 dias);
+- estado (ADMIN): `GET http://localhost:8080/api/integrations/thingspeak/status`.
+
+O Python repassa essas duas rotas ao Java para o painel: `GET /api/v1/integrations/thingspeak/status` e `POST /api/v1/integrations/thingspeak/sync` (ADMIN). Sem canal ou chave, o backend Java continua iniciando; a sincronização retorna `configured=false` e as telas mostram a indisponibilidade.
 
 ## 9. Testes
 
@@ -263,7 +275,7 @@ A suíte de persistência Java usa Testcontainers com MySQL e é marcada para se
 - Portas padrão: frontend `5173`, Java `8080`, Python `8000`, MySQL Server `3306`.
 - Segredos necessários: `JWT_SECRET`, `INITIAL_ADMIN_PASSWORD` e `INTERNAL_API_KEY`; além da senha do usuário local do MySQL. Mantenha os `.env` reais fora do Git.
 - Python e Java comunicam-se por `localhost`; o navegador usa same-origin pelo proxy Vite, com bases diretas configuráveis por `VITE_API_JAVA_BASE` e `VITE_API_PYTHON_BASE`.
-- ThingSpeak (`https://api.thingspeak.com`) é opcional e externo. Não há dependência de backend hospedado ou domínio.
+- ThingSpeak (`https://api.thingspeak.com`) é opcional, externo e consultado somente pelo backend Java. Não há dependência de backend hospedado ou domínio.
 - npm, PyPI e Maven podem ser acessados para baixar dependências durante a instalação inicial; não são chamadas de runtime da aplicação.
 - Fontes tipográficas são instaladas por npm e servidas localmente pelo frontend.
 
@@ -274,5 +286,5 @@ A suíte de persistência Java usa Testcontainers com MySQL e é marcada para se
 - **JWT ou administrador não configurado:** preencha `JWT_SECRET` e `INITIAL_ADMIN_PASSWORD` no `.env` Java antes do primeiro boot; a senha deve cumprir a política do sistema.
 - **`Address already in use`:** libere a porta ou ajuste `PORT`, `VITE_PORT` e os destinos `DEV_*_API_URL`/bases da API correspondentes.
 - **Erro de CORS usando chamada direta:** acrescente a origem exata (incluindo porta) a `CORS_ALLOWED_ORIGINS` nos dois serviços e reinicie-os. Não use `*` em substituição à lista.
-- **ThingSpeak indisponível:** confirme canal, chave de leitura, `THINGSPEAK_FIELD_MAP` e acesso à Internet; isso não impede o boot das APIs.
+- **ThingSpeak indisponível:** confirme `THINGSPEAK_CHANNEL_ID`, `THINGSPEAK_READ_API_KEY` e o acesso à Internet no `backend/java/.env`, e consulte `/api/integrations/thingspeak/status`; isso não impede o boot das APIs.
 - **Tela carrega, mas login falha:** confirme que o MySQL Server, Java e Python foram iniciados; consulte os logs do backend e teste `/actuator/health` e `/health`.

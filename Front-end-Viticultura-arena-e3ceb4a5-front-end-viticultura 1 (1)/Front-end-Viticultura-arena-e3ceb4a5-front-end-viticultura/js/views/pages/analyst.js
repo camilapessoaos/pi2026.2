@@ -5,35 +5,13 @@ import { barChart, chartLegend, donutChart, lineChart } from '../../components/c
 import { pageHeader } from '../../components/page-header.js';
 import { readingsTable, tableWrapper } from '../../components/tables.js';
 import { VARIETIES } from '../../data/varieties.js';
+import { climateMetric, climateMetricRows, climateSeries } from '../../config/climate-metrics.js';
 import { page } from './page-layout.js';
 
 const number = (value, digits = 1) => value === null || value === undefined || !Number.isFinite(Number(value))
   ? '—'
   : Number(value).toLocaleString('pt-BR', { maximumFractionDigits: digits });
 
-function metricEntry(climate, key) {
-  const aliases = {
-    temperature: ['temperature', 'temperaturec', 'tempc', 'temp'],
-    humidity: ['humidity', 'relativehumidity', 'airhumidity'],
-  }[key] || [key];
-  return Object.entries(climate?.metrics || {}).find(([name]) => aliases.includes(name.toLowerCase().replaceAll('_', ''))) || null;
-}
-
-function metricSeries(climate, key) {
-  const entry = metricEntry(climate, key);
-  if (!entry) return { values: [], labels: [] };
-  const [name] = entry;
-  const values = [];
-  const labels = [];
-  (climate?.series || []).forEach((point) => {
-    const raw = point.values?.[name];
-    if (raw === null || raw === undefined || !Number.isFinite(Number(raw))) return;
-    values.push(Number(raw));
-    const date = new Date(point.timestamp);
-    labels.push(Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(date));
-  });
-  return { values, labels };
-}
 
 function pipelineHealth(sources = [], quality = null, forecast = null) {
   const source = (name) => sources.find((item) => item.source === name);
@@ -55,9 +33,9 @@ export function analyticsDashboardPage({ analystDashboard, dashboard, forecast }
   const summary = analystDashboard?.summary || dashboard;
   const climate = summary?.climate;
   const quality = analystDashboard?.quality;
-  const temperature = metricEntry(climate, 'temperature')?.[1];
-  const tempSeries = metricSeries(climate, 'temperature');
-  const humiditySeries = metricSeries(climate, 'humidity');
+  const temperature = climateMetric(climate, 'temperature');
+  const tempSeries = climateSeries(climate, 'temperature');
+  const humiditySeries = climateSeries(climate, 'humidity');
   const valid = quality?.validRecords || 0;
   const review = quality?.reviewRecords || 0;
   const rejected = quality?.rejectedRecords || 0;
@@ -143,7 +121,7 @@ function reportTableRows(plantations, varieties, climate) {
     const color = VARIETIES.find((entry) => entry.name === name)?.color || 'green';
     return html`<tr><td><div class="variety-cell"><span class="grape-dot grape-${color}"></span><strong>${name}</strong></div></td><td>${entries.length}</td><td>${plants.toLocaleString('pt-BR')}</td><td>${harvested}</td></tr>`;
   });
-  const metrics = Object.entries(climate?.metrics || {}).map(([name, metric]) => `${name}: ${metric.current ?? '—'} ${metric.unit || ''}`).join(' · ');
+  const metrics = climateMetricRows(climate).map(({ label, metric }) => `${label}: ${metric.current ?? '—'} ${metric.unit || ''}`).join(' · ');
   return html`${metrics && html`<p class="comparison-climate">Leituras agregadas por canal: ${metrics}. Não há vínculo sensor-variedade.</p>`}${tableWrapper(['Variedade', 'Plantações', 'Plantas registradas', 'Colhidas'], rows)}`;
 }
 
@@ -174,7 +152,7 @@ export function buildAnalystCsv(state = {}) {
     ['Tipo de registro', 'Variedade', 'Quantidade', 'Talhão', 'Início', 'Colheita', 'Status'],
     ...records.map((item) => ['Plantação', item.variety, item.quantity, item.field, item.plantedAt, item.harvestedAt, item.status]),
     ['Métrica climática', '', '', '', '', '', ''],
-    ...Object.entries(state.analystDashboard?.summary?.climate?.metrics || state.dashboard?.climate?.metrics || {}).map(([name, metric]) => [name, metric.current, metric.average, metric.minimum, metric.maximum, metric.unit, metric.samples]),
+    ...climateMetricRows({ metrics: state.analystDashboard?.summary?.climate?.metrics || state.dashboard?.climate?.metrics }).map(({ label, metric }) => [label, metric.current, metric.average, metric.minimum, metric.maximum, metric.unit, metric.samples]),
   ];
   return `\uFEFF${lines.map((line) => line.map(quote).join(';')).join('\r\n')}`;
 }

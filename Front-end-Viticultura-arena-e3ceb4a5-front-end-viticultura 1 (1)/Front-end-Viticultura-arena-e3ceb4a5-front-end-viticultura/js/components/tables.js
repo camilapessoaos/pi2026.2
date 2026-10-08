@@ -1,6 +1,7 @@
 import { html } from '../utils/html.js';
 import { VARIETIES } from '../data/varieties.js';
 import { badge, button, card, sectionHead } from './ui.js';
+import { CLIMATE_METRIC_KEYS, climatePointValue, measurementLabel } from '../config/climate-metrics.js';
 
 const tableWrapper = (head, body) =>
   html`<div class="table-scroll"><table><thead><tr>${head.map((column) => html`<th>${column}</th>`)}</tr></thead><tbody>${body}</tbody></table></div>`;
@@ -38,14 +39,12 @@ function formatDate(value) {
   return Number.isNaN(date.getTime()) ? 'Data indisponível' : new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'medium' }).format(date);
 }
 
-const MEASUREMENT_LABELS = { temperature: 'Temperatura (°C)', humidity: 'Umidade (%)' };
-
 export function readingsTable(climate = null) {
   const points = Array.isArray(climate?.series) ? climate.series.slice().reverse() : [];
-  const keys = [...new Set(points.flatMap((point) => Object.keys(point.values || {})))];
-  const headers = ['Data / hora', ...keys.map((key) => MEASUREMENT_LABELS[key] || key), 'Canal', 'Qualidade'];
+  const keys = CLIMATE_METRIC_KEYS;
+  const headers = ['Data / hora', ...keys.map(measurementLabel), 'Canal', 'Qualidade'];
   const rows = points.length
-    ? points.slice(0, 12).map((point) => html`<tr><td>${formatDate(point.timestamp)}</td>${keys.map((key) => html`<td>${point.values?.[key] ?? '—'}</td>`)}<td>${climate?.channelId || 'ThingSpeak'}</td><td>${badge('Disponível', 'success')}</td></tr>`)
+    ? points.slice(0, 12).map((point) => html`<tr><td>${formatDate(point.timestamp)}</td>${keys.map((key) => html`<td>${climatePointValue(point, key) ?? '—'}</td>`)}<td>${climate?.channelId || 'ThingSpeak'}</td><td>${badge('Disponível', 'success')}</td></tr>`)
     : [html`<tr><td colspan="${headers.length}"><div class="empty-state compact"><small>Nenhuma leitura climática foi retornada pela API no período.</small></div></td></tr>`];
   return card(
     html`${sectionHead({

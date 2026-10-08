@@ -2,120 +2,69 @@ import asyncio
 from datetime import UTC, datetime
 
 import httpx
+import pytest
 
 from app.config import Settings
+from app.errors import ServiceError
 from app.services.dashboard import DashboardService
 
+JAVA_SYNC_RESULT = {
+    "configured": True,
+    "channelId": "3499301",
+    "received": 3,
+    "normalized": 2,
+    "rejected": 1,
+    "inserted": 2,
+    "alreadyPresent": 0,
+    "synchronizedAt": "2026-10-08T22:00:00Z",
+    "message": "Sincronização concluída.",
+}
 
-def test_thingspeak_readings_are_normalized_and_posted_to_java_internal_api():
+
+def test_manual_sync_is_delegated_to_java_and_python_never_contacts_thingspeak():
     observed: list[httpx.Request] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
         observed.append(request)
-        if request.url.host == "api.thingspeak.test":
-            return httpx.Response(200, json={
-                "channel": {"id": 77},
-                "feeds": [{
-                    "entry_id": 6,
-                    "created_at": datetime.now(UTC).isoformat(),
-                    "field1": "23.5",
-                    "field2": "61",
-                }],
-            })
-        if request.url.path == "/api/internal/climate-readings/batch":
-            assert request.headers["X-Internal-Api-Key"] == "x" * 40
-            return httpx.Response(200, json={"received": 1, "inserted": 1, "alreadyPresent": 0})
-        return httpx.Response(404)
+        assert request.url.host == "java.test", "Python deve falar apenas com a API Java"
+        return httpx.Response(200, json=JAVA_SYNC_RESULT)
 
     async def run():
-        settings = Settings(
-            java_api_url="http://java.test",
-            thingspeak_channel_id="77",
-            thingspeak_url="https://api.thingspeak.test",
-            thingspeak_field_map={"temperature": "field1", "humidity": "field2"},
-            thingspeak_read_api_key="sensor-key",
-            internal_api_key="x" * 40,
-        )
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            return await DashboardService(settings, client).sync_latest()
+            return await DashboardService(Settings(java_api_url="http://java.test"), client).sync_latest("Bearer admin")
 
     result = asyncio.run(run())
-
-    assert result.received == 1
-    assert result.normalized == 1
-    assert result.inserted == 1
-    assert result.rejected == 0
-    assert len(observed) == 2
-    ingest = observed[1]
-    payload = __import__("json").loads(ingest.content)
-    reading = payload["readings"][0]
-    assert reading["channelId"] == "77"
-    assert reading["entryId"] == 6
-    assert reading["measurements"] == {"temperature": 23.5, "humidity": 61.0}
+    assert result.inserted == 2
+    assert result.rejected == 1
+    assert result.channel_id == "3499301"
+    assert observed[0].method == "POST"
+    assert observed[0].url.path == "/api/integrations/thingspeak/sync"
+    assert observed[0].headers["Authorization"] == "Bearer admin"
+    assert "from" not in observed[0].url.params
 
 
-def test_sync_sends_only_temperature_and_humidity_even_when_feed_has_other_fields():
-    observed_payloads: list[dict] = []
+def test_sync_window_is_forwarded_to_java_in_utc_z_format():
+    observed: list[httpx.Request] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.host == "api.thingspeak.test":
-            return httpx.Response(200, json={
-                "channel": {"id": 77},
-                "feeds": [{
-                    "entry_id": 9,
-                    "created_at": datetime.now(UTC).isoformat(),
-                    "field1": "22.0",
-                    "field2": "55",
-                    "field3": "3.1",
-                    "field4": "800",
-                }],
-            })
-        observed_payloads.append(__import__("json").loads(request.content))
-        return httpx.Response(202, json={"received": 1, "inserted": 1, "alreadyPresent": 0})
+        observed.append(request)
+        return httpx.Response(200, json=JAVA_SYNC_RESULT)
 
     async def run():
-        settings = Settings(
-            java_api_url="http://java.test",
-            thingspeak_channel_id="77",
-            thingspeak_url="https://api.thingspeak.test",
-            thingspeak_read_api_key="sensor-key",
-            internal_api_key="x" * 40,
-        )
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            return await DashboardService(settings, client).sync_latest()
+            return await DashboardService(Settings(java_api_url="http://java.test"), client).sync_latest(
+                "Bearer admin", datetime(2026, 10, 7, tzinfo=UTC), datetime(2026, 10, 8, tzinfo=UTC))
 
-    result = asyncio.run(run())
-    assert result.inserted == 1
-    assert observed_payloads[0]["readings"][0]["measurements"] == {"temperature": 22.0, "humidity": 55.0}
+    asyncio.run(run())
+    assert dict(observed[0].url.params) == {"from": "2026-10-07T00:00:00Z", "to": "2026-10-08T00:00:00Z"}
 
 
-def test_sync_posts_large_feeds_in_batches_below_java_limit():
-    batches: list[int] = []
-    feeds = [
-        {"entry_id": index, "created_at": datetime.now(UTC).isoformat(), "field1": "20", "field2": "60"}
-        for index in range(1, 1201)
-    ]
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.host == "api.thingspeak.test":
-            return httpx.Response(200, json={"channel": {"id": 77}, "feeds": feeds})
-        size = len(__import__("json").loads(request.content)["readings"])
-        batches.append(size)
-        return httpx.Response(202, json={"received": size, "inserted": size, "alreadyPresent": 0})
-
+def test_sync_window_requires_both_dates():
     async def run():
-        settings = Settings(
-            java_api_url="http://java.test",
-            thingspeak_channel_id="77",
-            thingspeak_url="https://api.thingspeak.test",
-            internal_api_key="x" * 40,
-            thingspeak_results_limit=8000,
-        )
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            return await DashboardService(settings, client).sync_latest()
+        async with httpx.AsyncClient() as client:
+            await DashboardService(Settings(java_api_url="http://java.test"), client).sync_latest(
+                "Bearer admin", datetime(2026, 10, 7, tzinfo=UTC), None)
 
-    result = asyncio.run(run())
-    assert batches == [500, 500, 200]
-    assert max(batches) <= 1000
-    assert result.inserted == 1200
-    assert result.normalized == 1200
+    with pytest.raises(ServiceError) as error:
+        asyncio.run(run())
+    assert error.value.status_code == 400

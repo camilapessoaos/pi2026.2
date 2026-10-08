@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from contextlib import asynccontextmanager
 import logging
 from typing import AsyncIterator
@@ -22,39 +21,27 @@ from app.errors import (
     unhandled_error_handler,
     validation_error_handler,
 )
-from app.services.dashboard import DashboardService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("agroclima.api")
 
 
-def create_app(settings: Settings | None = None, *, start_poller: bool = True) -> FastAPI:
+def create_app(settings: Settings | None = None) -> FastAPI:
     app_settings = settings or Settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.settings = app_settings
         app.state.http_client = httpx.AsyncClient(timeout=app_settings.request_timeout_seconds)
-        app.state.last_sync = None
-        app.state.last_sync_error = None
-        poller: asyncio.Task | None = None
-        if start_poller and app_settings.enable_background_sync and app_settings.thingspeak_configured:
-            poller = asyncio.create_task(_poll_thingspeak(app), name="thingspeak-sync")
         try:
             yield
         finally:
-            if poller:
-                poller.cancel()
-                try:
-                    await poller
-                except asyncio.CancelledError:
-                    pass
             await app.state.http_client.aclose()
 
     application = FastAPI(
         title=app_settings.service_name,
         description=(
-            "API analítica para leituras ThingSpeak, métricas climáticas e dashboards. "
+            "API analítica para temperatura, umidade, métricas climáticas e dashboards. "
             "A autenticação e o escopo de dados são validados pela API Java."
         ),
         version="1.0.0",
@@ -128,33 +115,11 @@ def create_app(settings: Settings | None = None, *, start_poller: bool = True) -
         return {
             "status": "UP",
             "service": settings.service_name,
-            "thingspeakConfigured": settings.thingspeak_configured,
             "javaApiConfigured": bool(settings.java_api_url),
-            "lastSync": request.app.state.last_sync,
-            "lastSyncError": request.app.state.last_sync_error,
+            "internalKeyConfigured": settings.internal_key_configured,
         }
 
     return application
-
-
-async def _poll_thingspeak(app: FastAPI) -> None:
-    settings: Settings = app.state.settings
-    while True:
-        try:
-            result = await DashboardService(settings, app.state.http_client).sync_latest()
-            app.state.last_sync = result.synchronized_at
-            app.state.last_sync_error = None
-            logger.info(
-                "ThingSpeak sync received=%d normalized=%d inserted=%d rejected=%d",
-                result.received, result.normalized, result.inserted, result.rejected,
-            )
-        except ServiceError as exception:
-            app.state.last_sync_error = exception.status_code
-            logger.warning("ThingSpeak sync unavailable status=%d", exception.status_code)
-        except Exception as exception:
-            app.state.last_sync_error = 500
-            logger.error("ThingSpeak sync failed type=%s", type(exception).__name__)
-        await asyncio.sleep(settings.thingspeak_poll_interval_seconds)
 
 
 app = create_app()

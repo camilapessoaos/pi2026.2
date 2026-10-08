@@ -6,6 +6,7 @@ import { lineChart } from '../../components/charts.js';
 import { pageHeader } from '../../components/page-header.js';
 import { comparisonTable, readingsTable, tableWrapper } from '../../components/tables.js';
 import { page } from './page-layout.js';
+import { climateMetric, climateSeries } from '../../config/climate-metrics.js';
 
 function formatNumber(value, maximumFractionDigits = 1) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return 'Sem leitura';
@@ -21,43 +22,6 @@ function formatCapture(value) {
 function formatMetric(metric, property = 'current') {
   if (!metric || metric[property] === null || metric[property] === undefined) return 'Sem leitura';
   return `${formatNumber(metric[property])}${metric.unit ? ` ${metric.unit}` : ''}`;
-}
-
-function normalizeMetricName(value) {
-  return String(value).toLowerCase().replaceAll('_', '');
-}
-
-// Únicas métricas tratadas pelo canal ThingSpeak: temperatura (field1) e umidade (field2).
-const METRIC_ALIASES = {
-  temperature: ['temperature', 'temperaturec', 'tempc', 'temp'],
-  humidity: ['humidity', 'relativehumidity', 'airhumidity'],
-};
-
-function metricEntry(climate, requested) {
-  const metrics = climate?.metrics || {};
-  const aliases = METRIC_ALIASES[normalizeMetricName(requested)] || [normalizeMetricName(requested)];
-  return Object.entries(metrics).find(([name]) => aliases.includes(normalizeMetricName(name))) || null;
-}
-
-function metricFor(climate, requested) {
-  return metricEntry(climate, requested)?.[1] || null;
-}
-
-function seriesFor(climate, requested) {
-  const entry = metricEntry(climate, requested);
-  if (!entry) return null;
-  const [key] = entry;
-  const points = Array.isArray(climate?.series) ? climate.series : [];
-  const values = [];
-  const labels = [];
-  points.forEach((point) => {
-    const raw = point.values?.[key];
-    if (raw === null || raw === undefined || !Number.isFinite(Number(raw))) return;
-    values.push(Number(raw));
-    const date = new Date(point.timestamp);
-    labels.push(Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(date));
-  });
-  return { values, labels };
 }
 
 function emptySeries() {
@@ -81,10 +45,10 @@ function noModelCard(title, message, actionLabel, pageName) {
 export function overviewPage({ variety, dashboard }) {
   const climate = dashboard?.climate;
   const plantations = dashboard?.plantations || {};
-  const temperature = metricFor(climate, 'temperature');
-  const humidity = metricFor(climate, 'humidity');
-  const tempSeries = seriesFor(climate, 'temperature') || emptySeries();
-  const humiditySeries = seriesFor(climate, 'humidity') || emptySeries();
+  const temperature = climateMetric(climate, 'temperature');
+  const humidity = climateMetric(climate, 'humidity');
+  const tempSeries = climateSeries(climate, 'temperature') || emptySeries();
+  const humiditySeries = climateSeries(climate, 'humidity') || emptySeries();
   const comparison = { climateMetrics: climate?.metrics || {}, plantationsByVariety: plantations.byVariety || [] };
   return page(
     pageHeader({ title: 'Visão Geral', subtitle: 'Acompanhe as leituras disponíveis e os registros da sua produção.', variety }),
@@ -108,10 +72,10 @@ function integrationStatus(climate) {
 }
 
 export function monitoringPage({ variety, climate }) {
-  const temperature = metricFor(climate, 'temperature');
-  const humidity = metricFor(climate, 'humidity');
-  const tempSeries = seriesFor(climate, 'temperature') || emptySeries();
-  const humiditySeries = seriesFor(climate, 'humidity') || emptySeries();
+  const temperature = climateMetric(climate, 'temperature');
+  const humidity = climateMetric(climate, 'humidity');
+  const tempSeries = climateSeries(climate, 'temperature') || emptySeries();
+  const humiditySeries = climateSeries(climate, 'humidity') || emptySeries();
   return page(
     pageHeader({ title: 'Monitoramento Climático', subtitle: 'Leituras persistidas pelo serviço climático para sua conta.', variety }),
     integrationStatus(climate),
@@ -132,8 +96,8 @@ function unavailableAnalysis(title, message) {
 
 export function forecastsPage({ variety, forecast, climate }) {
   const available = Boolean(forecast?.available && forecast?.predictions?.length);
-  const temperature = metricFor(climate, 'temperature');
-  const tempSeries = seriesFor(climate, 'temperature') || emptySeries();
+  const temperature = climateMetric(climate, 'temperature');
+  const tempSeries = climateSeries(climate, 'temperature') || emptySeries();
   return page(
     pageHeader({ title: 'Previsões', subtitle: `Dados de previsão para ${variety}; somente resultados de modelos ativos são exibidos.`, variety }),
     metricsGrid([

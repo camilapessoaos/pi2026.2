@@ -6,11 +6,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from app.config import THINGSPEAK_METRIC_FIELDS
 from app.models import ClimatePoint, ClimateSummary, MetricSummary
 
-# Únicas métricas tratadas pelo serviço: temperatura (field1) e umidade (field2).
-SUPPORTED_METRIC_KEYS = frozenset(THINGSPEAK_METRIC_FIELDS)
+# Únicas métricas do canal ThingSpeak tratadas: temperatura (field1) e umidade (field2).
+SUPPORTED_METRIC_KEYS = frozenset({"temperature", "humidity"})
 
 
 UNITS = {

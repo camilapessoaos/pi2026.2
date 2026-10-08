@@ -4,23 +4,24 @@ from app.config import Settings
 from app.main import create_app
 
 
-def test_health_reports_configuration_without_exposing_secrets():
+def test_health_reports_java_connection_without_exposing_secrets():
     settings = Settings(
-        thingspeak_channel_id="123456",
-        thingspeak_read_api_key="do-not-return-this-key",
-        internal_api_key="this-is-a-long-internal-key-for-tests",
+        java_api_url="http://java.test",
+        internal_api_key="this-is-a-long-internal-key-for-tests-123",
     )
-    with TestClient(create_app(settings, start_poller=False)) as client:
+    with TestClient(create_app(settings)) as client:
         response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json()["thingspeakConfigured"] is True
-    assert "do-not-return-this-key" not in response.text
-    assert "this-is-a-long-internal-key-for-tests" not in response.text
+    body = response.json()
+    assert body["javaApiConfigured"] is True
+    assert body["internalKeyConfigured"] is True
+    assert "thingspeakConfigured" not in body
+    assert "this-is-a-long-internal-key-for-tests-123" not in response.text
 
 
 def test_swagger_ui_assets_are_served_from_the_local_api_without_cdn():
-    with TestClient(create_app(Settings(), start_poller=False)) as client:
+    with TestClient(create_app(Settings())) as client:
         docs = client.get("/docs")
         javascript = client.get("/static/swagger-ui/swagger-ui-bundle.js")
         stylesheet = client.get("/static/swagger-ui/swagger-ui.css")
@@ -37,7 +38,7 @@ def test_swagger_ui_assets_are_served_from_the_local_api_without_cdn():
 
 
 def test_dashboard_requires_bearer_auth_and_uses_consistent_error_shape():
-    with TestClient(create_app(Settings(), start_poller=False)) as client:
+    with TestClient(create_app(Settings())) as client:
         response = client.get("/api/v1/dashboard/summary")
 
     assert response.status_code == 401
@@ -49,7 +50,7 @@ def test_dashboard_requires_bearer_auth_and_uses_consistent_error_shape():
 
 
 def test_cors_defaults_allow_local_development_origins_without_wildcard():
-    with TestClient(create_app(Settings(), start_poller=False)) as client:
+    with TestClient(create_app(Settings())) as client:
         response = client.options(
             "/api/v1/dashboard/summary",
             headers={
@@ -66,7 +67,7 @@ def test_cors_defaults_allow_local_development_origins_without_wildcard():
 
 def test_cors_uses_explicit_configured_origin_not_wildcard():
     settings = Settings(cors_allowed_origins="https://frontend.example.test")
-    with TestClient(create_app(settings, start_poller=False)) as client:
+    with TestClient(create_app(settings)) as client:
         response = client.options(
             "/api/v1/dashboard/summary",
             headers={

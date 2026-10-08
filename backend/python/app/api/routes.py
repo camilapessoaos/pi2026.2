@@ -4,11 +4,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-import httpx
 from fastapi import APIRouter, Depends, Header, Query, Request
 
 from app.clients.java_api import JavaApiClient
-from app.config import Settings
 from app.errors import ServiceError
 from app.models import (
     AnalystDashboard,
@@ -16,6 +14,7 @@ from app.models import (
     ForecastSummary,
     MarketSummary,
     QualitySummary,
+    SyncSummary,
     UserProfile,
 )
 from app.services.dashboard import DashboardService
@@ -41,6 +40,7 @@ async def current_context(
     request: Request,
     authorization: Annotated[str | None, Header(alias="Authorization")] = None,
 ) -> RequestContext:
+    """Valida o JWT na API Java: a autenticação e os papéis continuam sendo decididos pelo Java."""
     if not authorization or not authorization.lower().startswith("bearer ") or not authorization[7:].strip():
         raise ServiceError(401, "Autenticação Bearer obrigatória.")
     profile_data = await _java(request).current_user(authorization)
@@ -71,19 +71,19 @@ def _date_window(start: datetime | None, end: datetime | None) -> tuple[datetime
 async def current_climate(context: Annotated[RequestContext, Depends(current_context)], request: Request):
     end = datetime.now(UTC)
     start = end - timedelta(hours=24)
-    summary, _ = await _service(request).climate_summary(context.authorization, start, end)
+    summary, _ = await _service(request).climate_summary(start, end)
     return summary
 
 
 @router.get("/climate/history")
 async def climate_history(
-    context: Annotated[RequestContext, Depends(current_context)],
+    _: Annotated[RequestContext, Depends(current_context)],
     request: Request,
     start: datetime | None = Query(default=None, description="Data inicial ISO 8601 com fuso horário."),
     end: datetime | None = Query(default=None, description="Data final ISO 8601 com fuso horário."),
 ):
     start, end = _date_window(start, end)
-    summary, _ = await _service(request).climate_summary(context.authorization, start, end)
+    summary, _ = await _service(request).climate_summary(start, end)
     return summary
 
 
@@ -109,13 +109,12 @@ async def analyst_dashboard(
     start, end = _date_window(start, end)
     service = _service(request)
     summary = await service.dashboard_summary(context.authorization)
-    quality_data = await service.quality_summary(context.authorization, start, end)
-    quality = QualitySummary.model_validate(quality_data)
+    quality = QualitySummary.model_validate(await service.quality_summary(start, end))
     comparison = ComparisonSummary(
         available=summary.climate.available or summary.plantations.total_plantations > 0,
         climate_metrics=summary.climate.metrics,
         plantations_by_variety=summary.plantations.by_variety,
-        limitation="Le leituras climáticas são agregadas por canal. Não há vínculo entre sensor e variedade no cadastro atual.",
+        limitation="As leituras climáticas são agregadas por canal. Não há vínculo entre sensor e variedade no cadastro atual.",
     )
     return AnalystDashboard(summary=summary, quality=quality, comparison=comparison, generated_at=datetime.now(UTC))
 
@@ -129,7 +128,7 @@ async def climate_quality(
 ):
     _require_role(context, {"ANALYST", "ADMIN"})
     start, end = _date_window(start, end)
-    result = await _service(request).quality_summary(context.authorization, start, end)
+    result = await _service(request).quality_summary(start, end)
     return QualitySummary.model_validate(result)
 
 
@@ -157,18 +156,18 @@ async def forecast_dashboard(_: Annotated[RequestContext, Depends(current_contex
 
 @router.get("/integrations/thingspeak/status")
 async def thingspeak_status(context: Annotated[RequestContext, Depends(current_context)], request: Request):
+    """Status da integração ThingSpeak, lido do backend Java (ADMIN)."""
     _require_role(context, {"ADMIN"})
-    settings: Settings = request.app.state.settings
-    return {
-        "configured": settings.thingspeak_configured,
-        "channelId": settings.thingspeak_channel_id or None,
-        "readKeyConfigured": bool(settings.thingspeak_key),
-        "internalSyncConfigured": settings.internal_key_configured,
-        "fieldMap": settings.thingspeak_field_map,
-    }
+    return await _service(request).integration_status(context.authorization)
 
 
-@router.post("/integrations/thingspeak/sync")
-async def synchronize_thingspeak(context: Annotated[RequestContext, Depends(current_context)], request: Request):
+@router.post("/integrations/thingspeak/sync", response_model=SyncSummary)
+async def synchronize_thingspeak(
+    context: Annotated[RequestContext, Depends(current_context)],
+    request: Request,
+    start: datetime | None = Query(default=None, alias="from", description="Início opcional para reprocessar um período."),
+    end: datetime | None = Query(default=None, alias="to", description="Fim opcional para reprocessar um período."),
+):
+    """Dispara a sincronização no backend Java (ADMIN). O Python não acessa o ThingSpeak."""
     _require_role(context, {"ADMIN"})
-    return await _service(request).sync_latest()
+    return await _service(request).sync_latest(context.authorization, start, end)
