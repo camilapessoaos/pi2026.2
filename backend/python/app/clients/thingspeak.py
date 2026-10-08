@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from app.config import Settings
+from app.config import THINGSPEAK_METRIC_FIELDS, Settings
 from app.errors import ServiceError
 from app.models import NormalizedReading
 
@@ -29,10 +29,11 @@ class ThingSpeakClient:
         params: dict[str, str | int] = {"results": limit}
         if self.settings.thingspeak_key:
             params["api_key"] = self.settings.thingspeak_key
+        # A API do ThingSpeak espera start/end como "YYYY-MM-DD HH:NN:SS" em UTC (não ISO 8601).
         if start:
-            params["start"] = self._as_utc(start).isoformat().replace("+00:00", "Z")
+            params["start"] = self._format_thingspeak_datetime(start)
         if end:
-            params["end"] = self._as_utc(end).isoformat().replace("+00:00", "Z")
+            params["end"] = self._format_thingspeak_datetime(end)
         channel = self.settings.thingspeak_channel_id
         url = f"{self.settings.thingspeak_url}/channels/{channel}/feeds.json"
         try:
@@ -79,14 +80,15 @@ class ThingSpeakClient:
             if entry_id <= 0:
                 return None
             captured_at = self._parse_timestamp(feed.get("created_at"))
-            if captured_at > datetime.now(UTC).replace(microsecond=0) + __import__("datetime").timedelta(minutes=5):
+            if captured_at > datetime.now(UTC).replace(microsecond=0) + timedelta(minutes=5):
                 return None
         except (TypeError, ValueError, OverflowError):
             return None
 
         measurements: dict[str, Decimal] = {}
         review = False
-        for metric_name, field_name in self.settings.thingspeak_field_map.items():
+        # Somente temperatura (field1) e umidade (field2) são tratados; os demais campos são ignorados.
+        for metric_name, field_name in THINGSPEAK_METRIC_FIELDS.items():
             raw_value = feed.get(field_name)
             if raw_value is None or str(raw_value).strip() == "":
                 continue
@@ -123,13 +125,11 @@ class ThingSpeakClient:
     @staticmethod
     def _in_physical_range(metric_name: str, value: Decimal) -> bool:
         key = metric_name.lower().replace("_", "")
-        if key in {"humidity", "relativehumidity", "soilhumidity"}:
+        if key == "humidity":
             return Decimal("0") <= value <= Decimal("100")
-        if key in {"temperature", "temperaturec", "tempc"}:
+        if key == "temperature":
             return Decimal("-80") <= value <= Decimal("80")
-        if "rain" in key or key == "precipitation" or key in {"luminosity", "light"}:
-            return value >= Decimal("0")
-        return True
+        return False
 
     @staticmethod
     def _parse_timestamp(value: Any) -> datetime:
@@ -139,6 +139,10 @@ class ThingSpeakClient:
         if timestamp.tzinfo is None:
             timestamp = timestamp.replace(tzinfo=UTC)
         return timestamp.astimezone(UTC)
+
+    @classmethod
+    def _format_thingspeak_datetime(cls, value: datetime) -> str:
+        return cls._as_utc(value).strftime("%Y-%m-%d %H:%M:%S")
 
     @staticmethod
     def _as_utc(value: datetime) -> datetime:

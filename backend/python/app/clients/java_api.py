@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -8,6 +8,10 @@ import httpx
 from app.config import Settings
 from app.errors import ServiceError
 from app.models import NormalizedReading
+
+
+# A API Java aceita no máximo 1000 leituras por lote (@Size(max = 1000)); usamos lotes menores.
+INGEST_BATCH_SIZE = 500
 
 
 class JavaApiClient:
@@ -34,7 +38,7 @@ class JavaApiClient:
         end: datetime,
         channel_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        params: dict[str, str] = {"from": start.isoformat(), "to": end.isoformat()}
+        params: dict[str, str] = {"from": _utc_instant(start), "to": _utc_instant(end)}
         if channel_id:
             params["channelId"] = channel_id
         result = await self._request("GET", "/api/climate/readings", authorization=authorization, params=params)
@@ -43,23 +47,31 @@ class JavaApiClient:
         return result
 
     async def ingest_climate(self, readings: list[NormalizedReading]) -> dict[str, Any]:
+        """Envia as leituras normalizadas à API Java em lotes e agrega o resultado."""
         if not self.settings.internal_key_configured:
             raise ServiceError(503, "A integração interna com a API Java não está configurada.")
-        body = {
-            "readings": [
-                {
-                    "channelId": reading.channel_id,
-                    "entryId": reading.entry_id,
-                    "sensorCode": reading.sensor_code,
-                    "capturedAt": reading.captured_at.isoformat(),
-                    "measurements": {name: float(value) for name, value in reading.measurements.items()},
-                    "qualityStatus": reading.quality_status,
-                }
-                for reading in readings
-            ]
+        totals = {"received": 0, "inserted": 0, "alreadyPresent": 0}
+        for start in range(0, len(readings), INGEST_BATCH_SIZE):
+            batch = readings[start:start + INGEST_BATCH_SIZE]
+            body = {"readings": [self._reading_payload(reading) for reading in batch]}
+            result = await self._request(
+                "POST", "/api/internal/climate-readings/batch", json=body,
+                headers={"X-Internal-Api-Key": self.settings.internal_api_key.get_secret_value()},
+            ) or {}
+            for key in totals:
+                totals[key] += int(result.get(key, 0) or 0)
+        return totals
+
+    @staticmethod
+    def _reading_payload(reading: NormalizedReading) -> dict[str, Any]:
+        return {
+            "channelId": reading.channel_id,
+            "entryId": reading.entry_id,
+            "sensorCode": reading.sensor_code,
+            "capturedAt": _utc_instant(reading.captured_at),
+            "measurements": {name: float(value) for name, value in reading.measurements.items()},
+            "qualityStatus": reading.quality_status,
         }
-        return await self._request("POST", "/api/internal/climate-readings/batch", json=body,
-                                   headers={"X-Internal-Api-Key": self.settings.internal_api_key.get_secret_value()})
 
     async def _request(self, method: str, path: str, *, authorization: str | None = None,
                        params: dict[str, str] | None = None, json: dict[str, Any] | None = None,
@@ -89,3 +101,9 @@ class JavaApiClient:
             return response.json()
         except ValueError as exception:
             raise ServiceError(502, "A API Java retornou conteúdo inválido.") from exception
+
+
+def _utc_instant(value: datetime) -> str:
+    """Formato ISO 8601 UTC com sufixo Z, aceito pelo parser Instant do Spring."""
+    aware = value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+    return aware.strftime("%Y-%m-%dT%H:%M:%SZ")

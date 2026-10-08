@@ -6,13 +6,13 @@ from urllib.parse import urlparse
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-DEFAULT_FIELD_MAP = {
+# O canal ThingSpeak possui apenas dois campos ativos: temperatura (field1) e umidade (field2).
+# Essa correspondência é fixa: qualquer outro mapeamento é rejeitado na inicialização.
+THINGSPEAK_METRIC_FIELDS: dict[str, str] = {
     "temperature": "field1",
     "humidity": "field2",
-    "rainfall": "field3",
-    "luminosity": "field4",
-    "soilHumidity": "field5",
 }
+DEFAULT_FIELD_MAP = THINGSPEAK_METRIC_FIELDS
 
 
 class Settings(BaseSettings):
@@ -59,14 +59,13 @@ class Settings(BaseSettings):
     @field_validator("thingspeak_field_map")
     @classmethod
     def validate_field_map(cls, value: dict[str, str]) -> dict[str, str]:
-        if not value:
-            raise ValueError("Configure ao menos um campo no THINGSPEAK_FIELD_MAP.")
-        for metric, field_name in value.items():
-            if not isinstance(metric, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", metric):
-                raise ValueError("Nome de métrica inválido em THINGSPEAK_FIELD_MAP.")
-            if not isinstance(field_name, str) or not re.fullmatch(r"field[1-8]", field_name.strip().lower()):
-                raise ValueError("Os campos ThingSpeak devem usar nomes como field1 até field8.")
-        return {metric.strip(): field_name.strip().lower() for metric, field_name in value.items()}
+        normalized = {str(metric).strip(): str(field_name).strip().lower() for metric, field_name in value.items()}
+        if normalized != THINGSPEAK_METRIC_FIELDS:
+            raise ValueError(
+                'THINGSPEAK_FIELD_MAP deve ser exatamente {"temperature":"field1","humidity":"field2"}. '
+                "O canal possui apenas temperatura (field1) e umidade (field2)."
+            )
+        return dict(THINGSPEAK_METRIC_FIELDS)
 
     @field_validator("thingspeak_poll_interval_seconds")
     @classmethod

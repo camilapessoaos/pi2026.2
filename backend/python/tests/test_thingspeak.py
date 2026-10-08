@@ -37,7 +37,7 @@ def test_normalizes_configured_fields_and_marks_invalid_measurement_for_review()
 
 
 def test_rejects_feed_without_any_usable_numeric_measurements():
-    settings = Settings(thingspeak_channel_id="9", thingspeak_field_map={"humidity": "field2"})
+    settings = Settings(thingspeak_channel_id="9")
     http = httpx.AsyncClient()
     try:
         readings, rejected = ThingSpeakClient(settings, http).normalize_feeds([{
@@ -90,3 +90,58 @@ def test_fetches_configured_channel_and_sends_read_key_without_logging_it():
     assert observed["channel"] == "123456"
     assert observed["api_key"] == "sensor-read-secret"
     assert "results=10" in observed["url"]
+
+
+def test_only_temperature_and_humidity_fields_are_normalized_and_other_fields_are_ignored():
+    settings = Settings(thingspeak_channel_id="123456")
+    http = httpx.AsyncClient()
+    try:
+        feed = {
+            "entry_id": 21,
+            "created_at": datetime.now(UTC).isoformat(),
+            "field1": "26.5",
+            "field2": "70",
+            "field3": "12.3",  # campo antigo de chuva: não é mais tratado
+            "field5": "45",    # campo antigo de umidade do solo: não é mais tratado
+        }
+        readings, rejected = ThingSpeakClient(settings, http).normalize_feeds([feed])
+    finally:
+        asyncio.run(http.aclose())
+
+    assert rejected == 0
+    assert readings[0].measurements == {"temperature": Decimal("26.5"), "humidity": Decimal("70")}
+
+
+def test_feed_with_only_ignored_fields_is_not_stored():
+    settings = Settings(thingspeak_channel_id="123456")
+    http = httpx.AsyncClient()
+    try:
+        readings, rejected = ThingSpeakClient(settings, http).normalize_feeds([{
+            "entry_id": 22,
+            "created_at": datetime.now(UTC).isoformat(),
+            "field3": "12.3",
+        }])
+    finally:
+        asyncio.run(http.aclose())
+
+    assert readings == []
+    assert rejected == 1
+
+
+def test_historical_window_uses_thingspeak_datetime_format_in_utc():
+    observed: dict[str, str] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        observed["start"] = request.url.params["start"]
+        observed["end"] = request.url.params["end"]
+        return httpx.Response(200, json={"channel": {"id": 123456}, "feeds": []})
+
+    async def run():
+        settings = Settings(thingspeak_channel_id="123456", thingspeak_url="https://sensor.example.test")
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            start = datetime(2026, 10, 7, 21, 0, 0, tzinfo=UTC)
+            end = datetime(2026, 10, 8, 3, 30, 0, tzinfo=UTC)
+            return await ThingSpeakClient(settings, http).fetch_feeds(start=start, end=end)
+
+    asyncio.run(run())
+    assert observed == {"start": "2026-10-07 21:00:00", "end": "2026-10-08 03:30:00"}

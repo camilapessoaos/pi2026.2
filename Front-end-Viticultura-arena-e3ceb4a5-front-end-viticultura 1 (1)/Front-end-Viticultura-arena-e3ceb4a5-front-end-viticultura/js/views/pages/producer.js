@@ -12,6 +12,12 @@ function formatNumber(value, maximumFractionDigits = 1) {
   return Number(value).toLocaleString('pt-BR', { maximumFractionDigits });
 }
 
+function formatCapture(value) {
+  if (!value) return 'Sem captura';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Sem captura' : new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(date);
+}
+
 function formatMetric(metric, property = 'current') {
   if (!metric || metric[property] === null || metric[property] === undefined) return 'Sem leitura';
   return `${formatNumber(metric[property])}${metric.unit ? ` ${metric.unit}` : ''}`;
@@ -21,12 +27,10 @@ function normalizeMetricName(value) {
   return String(value).toLowerCase().replaceAll('_', '');
 }
 
+// Únicas métricas tratadas pelo canal ThingSpeak: temperatura (field1) e umidade (field2).
 const METRIC_ALIASES = {
   temperature: ['temperature', 'temperaturec', 'tempc', 'temp'],
   humidity: ['humidity', 'relativehumidity', 'airhumidity'],
-  rainfall: ['rainfall', 'rain', 'precipitation'],
-  soilhumidity: ['soilhumidity', 'soilmoisture'],
-  luminosity: ['luminosity', 'light'],
 };
 
 function metricEntry(climate, requested) {
@@ -106,7 +110,6 @@ function integrationStatus(climate) {
 export function monitoringPage({ variety, climate }) {
   const temperature = metricFor(climate, 'temperature');
   const humidity = metricFor(climate, 'humidity');
-  const rain = metricFor(climate, 'rainfall');
   const tempSeries = seriesFor(climate, 'temperature') || emptySeries();
   const humiditySeries = seriesFor(climate, 'humidity') || emptySeries();
   return page(
@@ -116,7 +119,7 @@ export function monitoringPage({ variety, climate }) {
       { icon: 'thermo', label: 'Temperatura atual', value: formatMetric(temperature), meta: temperature ? `Máx. ${formatMetric(temperature, 'maximum')}` : 'Sem leitura', tone: 'orange' },
       { icon: 'drop', label: 'Umidade atual', value: formatMetric(humidity), meta: humidity ? `Mín. ${formatMetric(humidity, 'minimum')}` : 'Sem leitura', tone: 'blue' },
       { icon: 'activity', label: 'Amostras', value: climate?.records ?? 0, meta: 'No período retornado pela API' },
-      { icon: 'cloud', label: 'Precipitação', value: formatMetric(rain), meta: rain ? `Máx. ${formatMetric(rain, 'maximum')}` : 'Métrica não mapeada', tone: 'purple' },
+      { icon: 'cloud', label: 'Última captura', value: formatCapture(climate?.latestAt), meta: climate?.channelId ? `Canal ${climate.channelId}` : 'Canal não configurado', tone: 'purple' },
     ], 'four'),
     html`<div class="grid-2">${chartCard({ title: 'Temperatura por captura', subtitle: 'Dados ThingSpeak persistidos · °C', content: lineChart({ data: tempSeries.values, labels: tempSeries.labels }) })}${chartCard({ title: 'Umidade por captura', subtitle: 'Dados ThingSpeak persistidos · %', content: lineChart({ data: humiditySeries.values, labels: humiditySeries.labels, color: 'blue' }) })}</div>`,
     readingsTable(climate),

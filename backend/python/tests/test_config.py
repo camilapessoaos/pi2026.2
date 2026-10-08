@@ -4,9 +4,22 @@ from pydantic import ValidationError
 from app.config import Settings
 
 
-def test_field_mapping_is_configurable_and_limited_to_thingSpeak_fields():
-    settings = Settings(thingspeak_field_map={"temperature": "field3", "soilHumidity": "field8"})
-    assert settings.thingspeak_field_map == {"temperature": "field3", "soilHumidity": "field8"}
+def test_default_field_map_uses_only_temperature_field1_and_humidity_field2():
+    assert Settings().thingspeak_field_map == {"temperature": "field1", "humidity": "field2"}
+
+
+def test_field_map_accepts_the_two_active_channel_fields_with_normalized_names():
+    settings = Settings(thingspeak_field_map={" temperature ": "FIELD1", "humidity": "field2"})
+    assert settings.thingspeak_field_map == {"temperature": "field1", "humidity": "field2"}
+
+
+def test_field_map_rejects_any_other_metric_or_field_assignment():
+    with pytest.raises(ValidationError):
+        Settings(thingspeak_field_map={"temperature": "field1", "humidity": "field2", "rainfall": "field3"})
+    with pytest.raises(ValidationError):
+        Settings(thingspeak_field_map={"temperature": "field3", "humidity": "field2"})
+    with pytest.raises(ValidationError):
+        Settings(thingspeak_field_map={"temperature": "field1"})
 
 
 def test_rejects_invalid_channel_id_and_wildcard_origin_is_not_defaulted():

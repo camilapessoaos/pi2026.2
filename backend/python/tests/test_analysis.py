@@ -49,3 +49,16 @@ def test_empty_history_returns_explicit_unavailable_state_without_fake_samples()
     assert result.records == 0
     assert result.metrics == {}
     assert result.series == []
+
+
+def test_climate_summary_ignores_legacy_metrics_outside_temperature_and_humidity():
+    result = summarize_climate([
+        {
+            "capturedAt": "2026-10-07T10:00:00Z",
+            "measurements": {"temperature": 20, "humidity": 50, "rainfall": 3.2, "luminosity": 900},
+            "qualityStatus": "VALID",
+        },
+    ], channel_id="42")
+
+    assert set(result.metrics) == {"temperature", "humidity"}
+    assert result.series[0].values == {"temperature": 20.0, "humidity": 50.0}

@@ -6,7 +6,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from app.config import THINGSPEAK_METRIC_FIELDS
 from app.models import ClimatePoint, ClimateSummary, MetricSummary
+
+# Únicas métricas tratadas pelo serviço: temperatura (field1) e umidade (field2).
+SUPPORTED_METRIC_KEYS = frozenset(THINGSPEAK_METRIC_FIELDS)
 
 
 UNITS = {
@@ -15,12 +19,6 @@ UNITS = {
     "tempc": "°C",
     "humidity": "%",
     "relativehumidity": "%",
-    "soilhumidity": "%",
-    "rain": "mm",
-    "rainfall": "mm",
-    "precipitation": "mm",
-    "luminosity": "lx",
-    "light": "lx",
 }
 
 
@@ -57,6 +55,8 @@ def summarize_climate(readings: list[dict[str, Any]], *, channel_id: str | None 
             measurements = {}
         values: dict[str, float | None] = {}
         for name, raw_value in measurements.items():
+            if _metric_key(str(name)) not in SUPPORTED_METRIC_KEYS:
+                continue  # medições antigas de outros campos não entram no resumo
             try:
                 number = float(raw_value)
                 if not np.isfinite(number):

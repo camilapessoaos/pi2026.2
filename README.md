@@ -217,7 +217,7 @@ THINGSPEAK_CHANNEL_ID=ID_NUMERICO_DO_CANAL
 THINGSPEAK_READ_API_KEY=CHAVE_DE_LEITURA_SE_O_CANAL_FOR_PRIVADO
 THINGSPEAK_URL=[https://api.thingspeak.com](https://api.thingspeak.com)
 THINGSPEAK_FIELD_MAP={"temperature":"field1","humidity":"field2","rainfall":"field3","luminosity":"field4","soilHumidity":"field5"}
-Ajuste o mapa conforme os campos reais do canal e reinicie o serviço Python.
+O canal possui apenas dois campos ativos: **field1 = temperatura (°C)** e **field2 = umidade (%)**. O mapeamento é fixo no serviço Python; qualquer outro valor em THINGSPEAK_FIELD_MAP impede a inicialização. Campos adicionais do canal (field3 a field8) são ignorados.
 
 A sincronização automática roda no intervalo THINGSPEAK_POLL_INTERVAL_SECONDS.
 
