@@ -1,0 +1,6 @@
+# Arquivos de configuração local com segredos (chaves, senhas, tokens).
+# Os exemplos *.env.example continuam versionados.
+.env
+.env.*
+!.env.example
+!.env.*.example
