@@ -1,290 +1,72 @@
-# AgroClima Cloud — desenvolvimento local
+# AgroClima Cloud — Frontend (desenvolvimento local)
 
-Aplicação web com frontend JavaScript, API de domínio Spring Boot, serviço analítico FastAPI e MySQL Server local (administrável pelo MySQL Workbench). O ambiente de desenvolvimento usa **somente serviços locais**: não precisa de domínio, hospedagem, Railway, Render, AWS, Azure, Vercel ou Docker. ThingSpeak é a única integração externa opcional em tempo de execução e é consultado somente pelo backend Java.
-
-O navegador chama caminhos same-origin (`/api/java` e `/api/python`); o proxy do Vite encaminha as chamadas para as APIs locais. As fontes DM Sans e Manrope são empacotadas no frontend, e os arquivos Swagger UI do Python são servidos pela própria API; a documentação não depende de CDN.
+Esta pasta contém o `package.json` do frontend (Vite + JavaScript). Todos os comandos abaixo devem ser executados **dentro desta pasta**. Para subir as APIs Java e Python e o MySQL, siga o [README da raiz do repositório](../../README.md).
 
 ## 1. Pré-requisitos
 
-Instale no computador:
+- **Node.js 22.12+** (ou 20.19+) e **npm**. O Vite 7 não funciona em versões anteriores; confira com `node -v`.
+- As APIs Java (8080) e Python (8000) são necessárias para que os dados apareçam. A tela abre sem elas, mas as chamadas `/api/...` falham.
 
-- **JDK 21** e **Maven 3.9+** para a API Java;
-- **MySQL Server 8.4+** instalado e em execução local; o MySQL Workbench é opcional para administrar o servidor;
-- **Python 3.11+** para a API analítica;
-- **Node.js 22+** e npm para o frontend.
+## 2. Configurar o `.env`
 
-Não é necessário instalar ou iniciar Docker. As portas padrão devem estar livres:
+O Vite lê o `.env` que fica na mesma pasta do `package.json`. Crie-o a partir do exemplo:
 
-| Serviço | Porta padrão | URL local |
-|---|---:|---|
-| Frontend Vite | 5173 | <http://localhost:5173> |
-| API Java / Spring Boot | 8080 | <http://localhost:8080> |
-| API Python / FastAPI | 8000 | <http://localhost:8000> |
-| MySQL Server | 3306 | `localhost:3306` |
-
-## 2. Criar e configurar o MySQL Server local
-
-Instale e inicie o **MySQL Server 8.4** no computador. O MySQL Workbench é um cliente gráfico para administrar o servidor; instalá-lo sozinho não instala nem inicia o banco. Conecte pelo Workbench a `127.0.0.1:3306` com uma conta administrativa e execute uma vez no SQL Editor:
-
-```sql
-CREATE DATABASE agroclima
-  CHARACTER SET utf8mb4
-  COLLATE utf8mb4_0900_ai_ci;
-CREATE USER 'agroclima'@'localhost' IDENTIFIED BY 'SUBSTITUA_POR_UMA_SENHA_LOCAL';
-GRANT ALL PRIVILEGES ON agroclima.* TO 'agroclima'@'localhost';
-```
-
-Use a mesma senha em `DATABASE_PASSWORD` no `.env` Java. Caso já tenha criado outro schema ou usuário, atualize `DATABASE_URL`, `DATABASE_USER` e `DATABASE_PASSWORD` para corresponderem a eles. Para conexão direta local, o endereço padrão é `jdbc:mysql://localhost:3306/agroclima`.
-
-Ao iniciar a API Java, Flyway aplica as migrations MySQL em `backend/java/src/main/resources/db/migration/`; o Hibernate valida o schema (não o cria automaticamente). Depois do boot, atualize a lista de schemas no Workbench para conferir as tabelas `app_user`, `plantation`, `climate_reading` e demais objetos da aplicação. Os dados existentes em PostgreSQL não são migrados automaticamente: use um schema MySQL novo e planeje qualquer exportação/importação separadamente.
-
-O `docker-compose.yml` oferece, opcionalmente, um MySQL em container e publica sua porta local para conexão pelo Workbench; Docker não é necessário no fluxo direto acima.
-
-## 3. Arquivos `.env`
-
-Os exemplos não contêm credenciais de produção. Copie-os para arquivos locais — esses arquivos são ignorados pelo Git:
+Linux / macOS (Bash):
 
 ```bash
 cp .env.example .env
-cp backend/java/.env.example backend/java/.env
-cp backend/python/.env.example backend/python/.env
 ```
 
-No Windows, copie os mesmos arquivos pelo Explorer ou PowerShell:
+Windows (PowerShell):
 
 ```powershell
 Copy-Item .env.example .env
-Copy-Item backend/java/.env.example backend/java/.env
-Copy-Item backend/python/.env.example backend/python/.env
 ```
 
-### Java — `backend/java/.env`
-
-Preencha pelo menos:
-
-- `DATABASE_URL`, `DATABASE_USER` e `DATABASE_PASSWORD`: acesso ao MySQL Server local;
-- `JWT_SECRET`: segredo aleatório de pelo menos 32 bytes;
-- `INITIAL_ADMIN_EMAIL` e `INITIAL_ADMIN_PASSWORD`: conta administrativa inicial;
-- `INTERNAL_API_KEY`: chave aleatória com pelo menos 32 caracteres, compartilhada com o Python;
-- `PORT` e `SERVER_ADDRESS`: por padrão `8080` e `127.0.0.1`;
-- `CORS_ALLOWED_ORIGINS`: lista explícita de origens locais, sem `*`.
-
-Gere valores independentes para `JWT_SECRET` e `INTERNAL_API_KEY` e copie-os para os dois `.env` correspondentes. Para evitar problemas de escaping nos scripts de inicialização, também é prático usar uma senha hexadecimal para o banco e para o Administrador:
-
-```bash
-python3 -c "import secrets; print(secrets.token_hex(32))"
-```
-
-Execute o comando separadamente para cada segredo; use o valor de `DATABASE_PASSWORD` também ao criar o usuário MySQL no Workbench. A senha administrativa deve ter ao menos 8 caracteres, conter letras e números e respeitar o limite documentado pelo backend.
-
-### Python — `backend/python/.env`
-
-`JAVA_API_URL` deve permanecer como `http://localhost:8080`. Copie para `INTERNAL_API_KEY` **o mesmo valor** usado pela API Java. `CORS_ALLOWED_ORIGINS` permite as origens locais configuradas sem usar wildcard.
-
-O Python não acessa o ThingSpeak e não possui variáveis `THINGSPEAK_*`: as leituras chegam pela API Java, autenticadas com `INTERNAL_API_KEY`. A configuração do canal fica em `backend/java/.env`; veja [ThingSpeak](#8-thingspeak-opcional).
-
-### Frontend — `.env` na raiz
-
-O exemplo da raiz configura a porta Vite e os destinos do proxy local:
+O exemplo define a porta e os destinos do proxy:
 
 ```dotenv
 VITE_PORT=5173
-DEV_JAVA_API_URL=http://localhost:8080
-DEV_PYTHON_API_URL=http://localhost:8000
 VITE_API_JAVA_BASE=/api/java
 VITE_API_PYTHON_BASE=/api/python
+DEV_JAVA_API_URL=http://localhost:8080
+DEV_PYTHON_API_URL=http://localhost:8000
 ```
 
-Esses caminhos relativos preservam same-origin no navegador; o Vite faz o proxy para as APIs locais. Se optar por chamar as APIs diretamente do navegador, altere apenas `VITE_API_JAVA_BASE` para `http://localhost:8080` e `VITE_API_PYTHON_BASE` para `http://localhost:8000`; os serviços já têm CORS local configurável.
+Os caminhos relativos mantêm o navegador em same-origin; o Vite encaminha `/api/java` para `DEV_JAVA_API_URL` e `/api/python` para `DEV_PYTHON_API_URL`. As demais variáveis do arquivo são usadas apenas pelo Docker Compose opcional.
 
-## 4. Iniciar a API Java
+## 3. Instalar e iniciar
 
-Com MySQL Server ligado, schema/usuário criados e `backend/java/.env` preenchido, abra um terminal na raiz do projeto:
-
-**Linux/macOS (Bash):**
-
-```bash
-bash backend/java/run-local.sh
-```
-
-**Windows (PowerShell):**
-
-```powershell
-.\backend\java\run-local.ps1
-```
-
-Os scripts carregam as variáveis de `backend/java/.env` e executam `mvn spring-boot:run`. Alternativamente, no Bash:
-
-```bash
-cd backend/java
-set -a
-source .env
-set +a
-mvn spring-boot:run
-```
-
-A primeira execução do Maven baixa dependências de build; depois, a API roda localmente. O primeiro boot aplica as migrations e cria a conta administrativa inicial se ela ainda não existir.
-
-- Health: <http://localhost:8080/actuator/health>
-- Swagger UI: <http://localhost:8080/swagger-ui.html>
-- OpenAPI JSON: <http://localhost:8080/v3/api-docs>
-
-## 5. Iniciar a API Python
-
-Em outro terminal:
-
-**Linux/macOS (Bash):**
-
-```bash
-cd backend/python
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
-```
-
-**Windows (PowerShell):**
-
-```powershell
-Set-Location backend/python
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
-```
-
-FastAPI lê `backend/python/.env` ao iniciar a partir dessa pasta. Se a API Java estiver fora do ar, o Python continua iniciando; as rotas que dependem de leituras respondem com indisponibilidade e `/health` mostra `javaApiConfigured` e `internalKeyConfigured`.
-
-- Health: <http://localhost:8000/health>
-- Swagger UI: <http://localhost:8000/docs>
-- OpenAPI JSON: <http://localhost:8000/openapi.json>
-
-## 6. Iniciar o frontend
-
-Em um terceiro terminal na raiz do projeto:
+Linux / macOS (Bash):
 
 ```bash
 npm ci
 npm run dev
 ```
 
-Acesse <http://localhost:5173>. As chamadas usam os caminhos `/api/java/...` e `/api/python/...`; o proxy configurado em `vite.config.js` encaminha-os a `localhost:8080` e `localhost:8000`. Nenhum domínio de produção é consultado.
+Windows (PowerShell):
 
-O projeto também pode ser compilado para arquivos estáticos com `npm run build`. A configuração de Nginx e Docker Compose permanece opcional e não é usada pelos comandos locais acima.
-
-## 7. Verificar APIs, comunicação e autenticação
-
-### Health e documentação
-
-```bash
-curl -i http://localhost:8080/actuator/health
-curl -i http://localhost:8000/health
-curl -i http://localhost:5173/
-```
-
-Abra também as documentações Swagger indicadas acima. O frontend deve responder em `localhost:5173` mesmo que uma API esteja parada; as operações que dependem dela mostrarão erro de conexão.
-
-### Testar autenticação
-
-Use o e-mail e a senha definidos em `backend/java/.env` para a conta administrativa inicial:
-
-```bash
-curl -sS -X POST http://localhost:8080/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"admin@agroclima.com","password":"SENHA_CONFIGURADA_NO_ENV"}'
-```
-
-A resposta inclui `accessToken`. Use-o em operações protegidas:
-
-```bash
-curl -i http://localhost:8080/api/auth/me \
-  -H 'Authorization: Bearer COLE_O_ACCESS_TOKEN_AQUI'
-```
-
-Sem token, `/api/auth/me` e os recursos protegidos devem responder `401`. As permissões e o escopo de produtor são verificados pelo backend; a interface não substitui essas verificações. Também é possível criar uma conta Produtor pela tela de cadastro do frontend ou por `POST /api/auth/register`.
-
-### Testar o proxy frontend → APIs
-
-Com os três serviços em execução, abra <http://localhost:5173>, entre com a conta criada e navegue pelas páginas de dados. No painel Network do navegador, as requisições devem começar por `/api/java/` ou `/api/python/`, no mesmo host do frontend. Também se pode confirmar o health Python pelo proxy:
-
-```bash
-curl -i http://localhost:5173/api/python/health
-```
-
-### Testar CORS
-
-O CORS é restrito a origens locais explícitas (`localhost` e `127.0.0.1` nas portas usadas com Vite, Live Server e alternativas documentadas); não há `allow all`. O frontend Vite usa proxy same-origin e normalmente não precisa de CORS. Para conferir o preflight quando usar as bases diretas:
-
-```bash
-curl -i -X OPTIONS http://localhost:8080/api/auth/login \
-  -H 'Origin: http://localhost:5173' \
-  -H 'Access-Control-Request-Method: POST' \
-  -H 'Access-Control-Request-Headers: content-type'
-```
-
-A resposta deve incluir `Access-Control-Allow-Origin: http://localhost:5173`. O mesmo teste pode ser feito para a API Python em `http://localhost:8000/api/v1/dashboard/summary`.
-
-## 8. ThingSpeak (opcional)
-
-O backend Java consulta o canal diretamente em `https://api.thingspeak.com/channels/3499301/feeds.json`, normaliza as leituras e grava no MySQL. O Python e o frontend não acessam o ThingSpeak: o Python lê as leituras da API Java com `INTERNAL_API_KEY`.
-
-No arquivo `backend/java/.env`, defina:
-
-```dotenv
-THINGSPEAK_ENABLED=true
-THINGSPEAK_CHANNEL_ID=3499301
-THINGSPEAK_READ_API_KEY=SUA_READ_API_KEY_LOCAL
-THINGSPEAK_URL=https://api.thingspeak.com
-THINGSPEAK_FIELD_MAP='{"temperature":"field1","humidity":"field2"}'
-THINGSPEAK_POLL_INTERVAL_SECONDS=300
-```
-
-O canal possui apenas dois campos ativos: **field1 = temperatura (°C)** e **field2 = umidade (%)**. O mapa é fixo: qualquer outro valor em `THINGSPEAK_FIELD_MAP` impede a inicialização do Java. Os demais campos do canal são ignorados. Mantenha o JSON entre aspas simples para que o `run-local.sh` não o quebre.
-
-A `THINGSPEAK_READ_API_KEY` é um segredo: fica somente no `backend/java/.env` local (ignorado pelo Git) e não deve aparecer em arquivos de exemplo nem em logs.
-
-Sincronização:
-
-- automática: a cada `THINGSPEAK_POLL_INTERVAL_SECONDS`, somente com `THINGSPEAK_ENABLED=true`;
-- manual (ADMIN): `POST http://localhost:8080/api/integrations/thingspeak/sync`, com `?from=AAAA-MM-DDTHH:MM:SSZ&to=...` opcional (janela de até 366 dias);
-- estado (ADMIN): `GET http://localhost:8080/api/integrations/thingspeak/status`.
-
-O Python repassa essas duas rotas ao Java para o painel: `GET /api/v1/integrations/thingspeak/status` e `POST /api/v1/integrations/thingspeak/sync` (ADMIN). Sem canal ou chave, o backend Java continua iniciando; a sincronização retorna `configured=false` e as telas mostram a indisponibilidade.
-
-## 9. Testes
-
-```bash
-# Frontend
+```powershell
 npm ci
-npm run build
-
-# API Python
-cd backend/python
-python -m pip install -r requirements.txt
-python -m pytest -q tests
-
-# API Java: requer JDK 21 e Maven 3.9+
-cd ../java
-mvn test
+npm run dev
 ```
 
-A suíte de persistência Java usa Testcontainers com MySQL e é marcada para ser ignorada quando Docker não está disponível; os testes unitários podem ser executados sem Docker. Para validar as migrations e a persistência no fluxo sem Docker, mantenha o MySQL Server local ativo e faça o boot da API Java; o Hibernate valida o schema ao iniciar.
+Acesse http://localhost:5173. O servidor escuta em `0.0.0.0`, então também responde pelo IP da máquina na rede local.
 
-## 10. Variáveis e dependências externas
+## 4. Build e preview
 
-- Portas padrão: frontend `5173`, Java `8080`, Python `8000`, MySQL Server `3306`.
-- Segredos necessários: `JWT_SECRET`, `INITIAL_ADMIN_PASSWORD` e `INTERNAL_API_KEY`; além da senha do usuário local do MySQL. Mantenha os `.env` reais fora do Git.
-- Python e Java comunicam-se por `localhost`; o navegador usa same-origin pelo proxy Vite, com bases diretas configuráveis por `VITE_API_JAVA_BASE` e `VITE_API_PYTHON_BASE`.
-- ThingSpeak (`https://api.thingspeak.com`) é opcional, externo e consultado somente pelo backend Java. Não há dependência de backend hospedado ou domínio.
-- npm, PyPI e Maven podem ser acessados para baixar dependências durante a instalação inicial; não são chamadas de runtime da aplicação.
-- Fontes tipográficas são instaladas por npm e servidas localmente pelo frontend.
+```bash
+npm run build      # gera dist/ (ignorado pelo Git)
+npm run preview    # serve dist/ em http://localhost:4173
+```
 
-## 11. Problemas comuns
+## 5. Problemas comuns
 
-- **`Connection refused` na porta 3306:** inicie o MySQL Server local e confirme `DATABASE_URL`, usuário e senha.
-- **Falha de conexão Python → Java:** confirme que a API Java responde em `http://localhost:8080`, que `JAVA_API_URL` está assim no `.env` Python e que a chave interna é idêntica nos dois serviços.
-- **JWT ou administrador não configurado:** preencha `JWT_SECRET` e `INITIAL_ADMIN_PASSWORD` no `.env` Java antes do primeiro boot; a senha deve cumprir a política do sistema.
-- **`Address already in use`:** libere a porta ou ajuste `PORT`, `VITE_PORT` e os destinos `DEV_*_API_URL`/bases da API correspondentes.
-- **Erro de CORS usando chamada direta:** acrescente a origem exata (incluindo porta) a `CORS_ALLOWED_ORIGINS` nos dois serviços e reinicie-os. Não use `*` em substituição à lista.
-- **ThingSpeak indisponível:** confirme `THINGSPEAK_CHANNEL_ID`, `THINGSPEAK_READ_API_KEY` e o acesso à Internet no `backend/java/.env`, e consulte `/api/integrations/thingspeak/status`; isso não impede o boot das APIs.
-- **Tela carrega, mas login falha:** confirme que o MySQL Server, Java e Python foram iniciados; consulte os logs do backend e teste `/actuator/health` e `/health`.
+- **`npm ERR! ENOENT ... package.json` ou `Could not read package.json`:** o comando foi executado na raiz do repositório. Entre nesta pasta (`cd "Front-end-Viticultura-arena-e3ceb4a5-front-end-viticultura 1 (1)/Front-end-Viticultura-arena-e3ceb4a5-front-end-viticultura"`).
+- **`cp: cannot stat '.env.example'`:** o comando foi executado fora desta pasta. O `.env.example` do frontend fica aqui.
+- **`Vite requires Node.js version 20.19+ or 22.12+`:** atualize o Node.js.
+- **`Port 5173 is already in use`:** o Vite usa porta estrita. Libere a porta ou altere `VITE_PORT` no `.env`.
+- **Páginas abrem, mas as chamadas `/api/...` retornam 500 ou `ECONNREFUSED`:** a API Java (8080) ou a Python (8000) não está em execução.
+- **Caminhos com espaços e parênteses:** coloque o caminho entre aspas nos comandos de terminal.
+
+Os arquivos `docker-compose.yml` e `frontend.Dockerfile` são opcionais e não são usados pelos comandos acima.

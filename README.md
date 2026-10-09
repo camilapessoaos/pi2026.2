@@ -13,7 +13,7 @@ Instale no computador:
 * **JDK 21** e **Maven 3.9+** para a API Java;
 * **MySQL Server 8.4+** instalado e em execução local; o MySQL Workbench é opcional para administrar o servidor;
 * **Python 3.11+** para a API analítica;
-* **Node.js 22+** e **npm** para o frontend.
+* **Node.js 22.12+** (ou 20.19+) e **npm** para o frontend. O Vite 7 não funciona em versões anteriores.
 
 > **Nota:** Não é necessário instalar ou iniciar Docker.
 
@@ -58,13 +58,13 @@ Os exemplos não contêm credenciais de produção. Copie-os para arquivos locai
 Linux / macOS (Bash):
 
 Bash
-cp .env.example .env
+cp "Front-end-Viticultura-arena-e3ceb4a5-front-end-viticultura 1 (1)/Front-end-Viticultura-arena-e3ceb4a5-front-end-viticultura/.env.example" "Front-end-Viticultura-arena-e3ceb4a5-front-end-viticultura 1 (1)/Front-end-Viticultura-arena-e3ceb4a5-front-end-viticultura/.env"
 cp backend/java/.env.example backend/java/.env
 cp backend/python/.env.example backend/python/.env
 Windows (PowerShell):
 
 PowerShell
-Copy-Item .env.example .env
+Copy-Item "Front-end-Viticultura-arena-e3ceb4a5-front-end-viticultura 1 (1)\Front-end-Viticultura-arena-e3ceb4a5-front-end-viticultura\.env.example" "Front-end-Viticultura-arena-e3ceb4a5-front-end-viticultura 1 (1)\Front-end-Viticultura-arena-e3ceb4a5-front-end-viticultura\.env"
 Copy-Item backend/java/.env.example backend/java/.env
 Copy-Item backend/python/.env.example backend/python/.env
 Java — backend/java/.env
@@ -99,8 +99,8 @@ CORS_ALLOWED_ORIGINS permite as origens locais configuradas sem usar wildcard.
 
 O Python não acessa o ThingSpeak e não possui variáveis THINGSPEAK_*: as leituras chegam pela API Java, autenticadas com INTERNAL_API_KEY.
 
-Frontend — .env na raiz
-O exemplo da raiz configura a porta Vite e os destinos do proxy local:
+Frontend — .env na pasta do front
+O Vite lê o `.env` que fica na mesma pasta do `package.json` do frontend, não na raiz do repositório. O exemplo configura a porta Vite e os destinos do proxy local:
 
 Snippet de código
 VITE_PORT=5173
@@ -165,14 +165,34 @@ Swagger UI: http://localhost:8000/docs
 OpenAPI JSON: http://localhost:8000/openapi.json
 
 6. Iniciar o Frontend
-Em um terceiro terminal na raiz do projeto:
+O `package.json` do frontend não está na raiz do repositório. Ele fica na pasta `Front-end-Viticultura-arena-e3ceb4a5-front-end-viticultura 1 (1)/Front-end-Viticultura-arena-e3ceb4a5-front-end-viticultura`, e todos os comandos npm devem ser executados dentro dela. Na raiz, `npm ci` e `npm run dev` falham com `ENOENT` (package.json não encontrado).
+
+Em um terceiro terminal, a partir da raiz do repositório:
+
+Linux / macOS (Bash):
 
 Bash
+cd "Front-end-Viticultura-arena-e3ceb4a5-front-end-viticultura 1 (1)/Front-end-Viticultura-arena-e3ceb4a5-front-end-viticultura"
 npm ci
 npm run dev
-Acesse http://localhost:5173. As chamadas usam os caminhos /api/java/... e /api/python/...; o proxy configurado em vite.config.js encaminha-os para localhost:8080 e localhost:8000. Nenhum domínio de produção é consultado.
 
-O projeto também pode ser compilado para arquivos estáticos com npm run build. A configuração de Nginx e Docker Compose permanece opcional e não é usada pelos comandos locais acima.
+Windows (PowerShell):
+
+PowerShell
+Set-Location "Front-end-Viticultura-arena-e3ceb4a5-front-end-viticultura 1 (1)\Front-end-Viticultura-arena-e3ceb4a5-front-end-viticultura"
+npm ci
+npm run dev
+
+Acesse http://localhost:5173. Use as aspas no caminho: o nome da pasta contém espaços e parênteses. O `.env` do frontend (seção 3) define a porta e os destinos do proxy; sem ele, o Vite usa os valores padrão.
+
+Sem as APIs em execução, a tela abre normalmente, mas as chamadas /api/java/... e /api/python/... retornam erro 500 do proxy até que Java e Python sejam iniciados. As chamadas são encaminhadas pelo proxy configurado em vite.config.js para localhost:8080 e localhost:8000.
+
+Para gerar os arquivos estáticos, execute na mesma pasta:
+
+Bash
+npm run build
+
+O resultado vai para `dist/`, que é ignorado pelo Git. A configuração de Nginx e Docker Compose permanece opcional e não é usada pelos comandos locais acima.
 
 7. Verificar APIs, Comunicação e Autenticação
 Health e Documentação
@@ -239,9 +259,11 @@ Sem canal ou chave, o backend Java continua iniciando; a sincronização retorna
 
 9. Testes
 Bash
-# Frontend
+# Frontend (a partir da raiz do repositório)
+cd "Front-end-Viticultura-arena-e3ceb4a5-front-end-viticultura 1 (1)/Front-end-Viticultura-arena-e3ceb4a5-front-end-viticultura"
 npm ci
 npm run build
+cd ../..
 
 # API Python
 cd backend/python
@@ -280,3 +302,15 @@ Erro de CORS usando chamada direta: acrescente a origem exata (incluindo porta) 
 ThingSpeak indisponível: confirme THINGSPEAK_CHANNEL_ID, THINGSPEAK_READ_API_KEY e o acesso à Internet no backend/java/.env e consulte o log do Java (status em /api/integrations/thingspeak/status); isso não impede o boot das APIs.
 
 Tela carrega, mas login falha: confirme que o MySQL Server, Java e Python foram iniciados; consulte os logs do backend e teste /actuator/health e /health.
+
+Frontend: "ENOENT ... package.json" ou "Could not read package.json": o comando npm foi executado na raiz do repositório. Entre na pasta do frontend (seção 6) antes de rodar npm ci ou npm run dev.
+
+Frontend: "cp: cannot stat '.env.example'" na raiz: o .env.example do frontend fica dentro da pasta do frontend, não na raiz. Use o caminho completo mostrado na seção 3.
+
+Frontend: "Vite requires Node.js version 20.19+ or 22.12+": atualize o Node.js e confira com node -v.
+
+Frontend: "Port 5173 is already in use": o Vite usa porta estrita. Libere a porta ou altere VITE_PORT no .env do frontend.
+
+Frontend: as páginas abrem, mas as chamadas /api/... falham com 500 ou ECONNREFUSED: a API Java (8080) ou a Python (8000) não está em execução.
+
+Caminhos com espaços e parênteses: sempre entre aspas nos comandos de terminal.
